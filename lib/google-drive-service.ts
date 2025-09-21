@@ -61,24 +61,73 @@ export class GoogleDriveService {
 
   async setTokens(tokens: GoogleDriveToken): Promise<void> {
     try {
+      console.log('🔐 SETTING GOOGLE DRIVE TOKENS FOR USER:', this.userId)
+      console.log('📝 Token details:', {
+        hasAccessToken: !!tokens.access_token,
+        hasRefreshToken: !!tokens.refresh_token,
+        expiryDate: tokens.expiry_date,
+        scope: tokens.scope,
+        tokenType: tokens.token_type
+      })
+
       const supabase = await createServerClient()
-      const { error } = await supabase
+
+      // First try to update existing record
+      console.log('🔍 Checking for existing tokens...')
+      const { data: existingRecord, error: selectError } = await supabase
         .from('google_drive_tokens')
-        .upsert({
-          user_id: this.userId,
-          access_token: tokens.access_token,
-          refresh_token: tokens.refresh_token,
-          expiry_date: tokens.expiry_date,
-          scope: tokens.scope,
-          token_type: tokens.token_type,
-          updated_at: new Date().toISOString()
-        })
+        .select('user_id')
+        .eq('user_id', this.userId)
+        .single()
+
+      if (selectError && selectError.code !== 'PGRST116') { // PGRST116 is "not found"
+        console.error('❌ Error checking for existing tokens:', selectError)
+        throw selectError
+      }
+
+      let error
+      if (existingRecord) {
+        // Update existing record
+        console.log('📝 Updating existing Google Drive tokens for user:', this.userId)
+        const result = await supabase
+          .from('google_drive_tokens')
+          .update({
+            access_token: tokens.access_token,
+            refresh_token: tokens.refresh_token,
+            expiry_date: tokens.expiry_date,
+            scope: tokens.scope,
+            token_type: tokens.token_type,
+            updated_at: new Date().toISOString()
+          })
+          .eq('user_id', this.userId)
+        error = result.error
+        console.log('📊 Update operation result:', { success: !error, error })
+      } else {
+        // Insert new record
+        console.log('➕ Creating new Google Drive tokens for user:', this.userId)
+        const result = await supabase
+          .from('google_drive_tokens')
+          .insert({
+            user_id: this.userId,
+            access_token: tokens.access_token,
+            refresh_token: tokens.refresh_token,
+            expiry_date: tokens.expiry_date,
+            scope: tokens.scope,
+            token_type: tokens.token_type,
+            updated_at: new Date().toISOString()
+          })
+        error = result.error
+        console.log('📊 Insert operation result:', { success: !error, error })
+      }
 
       if (error) {
+        console.error('❌ Error storing tokens:', error)
         throw error
       }
+
+      console.log('✅ Successfully stored Google Drive tokens for user:', this.userId)
     } catch (error) {
-      console.error('Error setting tokens:', error)
+      console.error('💥 Error setting tokens:', error)
       throw error
     }
   }
