@@ -44,7 +44,7 @@ export class GmailService {
         .single()
 
       if (error || !data) {
-        // Fallback to google_drive_tokens for backward compatibility
+        // Check if there's a record in google_drive_tokens (legacy)
         const { data: fallbackData, error: fallbackError } = await supabase
           .from('google_drive_tokens')
           .select('*')
@@ -55,6 +55,7 @@ export class GmailService {
           return null
         }
 
+        console.log('📝 Found tokens in google_drive_tokens table (legacy), consider migrating to gmail_tokens')
         return {
           access_token: fallbackData.access_token,
           refresh_token: fallbackData.refresh_token,
@@ -109,25 +110,37 @@ export class GmailService {
         })
 
       if (gmailError) {
-        console.warn('Failed to save to gmail_tokens, falling back to google_drive_tokens:', gmailError)
-        // Fallback to google_drive_tokens for backward compatibility
-        const { error: fallbackError } = await supabase
-          .from('google_drive_tokens')
-          .upsert({
-            user_id: this.userId,
-            access_token: tokens.access_token,
-            refresh_token: tokens.refresh_token,
-            expiry_date: tokens.expiry_date,
-            scope: tokens.scope,
-            token_type: tokens.token_type,
-            updated_at: new Date().toISOString()
-          }, {
-            onConflict: 'user_id'
-          })
+        console.warn('Failed to save to gmail_tokens, checking if record exists:', gmailError)
 
-        if (fallbackError) {
-          console.error('❌ Error storing Gmail tokens:', fallbackError)
-          throw fallbackError
+        // Check if record already exists in gmail_tokens
+        const { data: existingRecord } = await supabase
+          .from('gmail_tokens')
+          .select('user_id')
+          .eq('user_id', this.userId)
+          .single()
+
+        if (existingRecord) {
+          console.log('✅ Gmail tokens already exist for user, updating existing record')
+          // Update existing record instead of insert
+          const { error: updateError } = await supabase
+            .from('gmail_tokens')
+            .update({
+              access_token: tokens.access_token,
+              refresh_token: tokens.refresh_token,
+              expiry_date: tokens.expiry_date,
+              scope: tokens.scope,
+              token_type: tokens.token_type,
+              updated_at: new Date().toISOString()
+            })
+            .eq('user_id', this.userId)
+
+          if (updateError) {
+            console.error('❌ Error updating Gmail tokens:', updateError)
+            throw updateError
+          }
+        } else {
+          console.warn('No existing Gmail tokens found, but insert failed. This might be a permissions issue.')
+          throw new Error(`Failed to store Gmail tokens: ${gmailError.message}`)
         }
       }
 

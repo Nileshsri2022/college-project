@@ -3,6 +3,7 @@
 import { useState } from "react"
 import { BirthdayForm } from "@/components/birthday-form"
 import { BirthdayList } from "@/components/birthday-list"
+import { BackButton } from "@/components/back-button"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { useToast } from "@/hooks/use-toast"
@@ -100,11 +101,13 @@ export default function BirthdaysPage() {
   }
 
   return (
-    <div className="container mx-auto p-6 space-y-8">
-      <div className="text-center space-y-2">
-        <h1 className="text-3xl font-bold">Birthday Reminder System</h1>
-        <p className="text-muted-foreground">Automate birthday reminders with AI-generated personalized messages</p>
-      </div>
+    <>
+      <BackButton to="/" label="Back to Dashboard" />
+      <div className="container mx-auto p-6 space-y-8">
+        <div className="text-center space-y-2">
+          <h1 className="text-3xl font-bold">Birthday Reminder System</h1>
+          <p className="text-muted-foreground">Automate birthday reminders with AI-generated personalized messages</p>
+        </div>
 
       {/* Manual Controls */}
       <Card>
@@ -163,10 +166,11 @@ export default function BirthdaysPage() {
         </CardContent>
       </Card>
 
-      <div className="grid md:grid-cols-2 gap-8">
-        <BirthdayForm onSuccess={handleBirthdayAdded} />
-        <BirthdayList refresh={refreshKey} />
+        <div className="grid md:grid-cols-2 gap-8">
+          <BirthdayForm onSuccess={handleBirthdayAdded} />
+          <BirthdayList refresh={refreshKey} />
+        </div>
       </div>
-    </div>
+    </>
   )
 }

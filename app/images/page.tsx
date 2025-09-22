@@ -3,6 +3,7 @@
 import { useState } from "react"
 import { ImageUploader } from "@/components/image-uploader"
 import { ImageGallery } from "@/components/image-gallery"
+import { BackButton } from "@/components/back-button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Upload, Battery as Gallery } from "lucide-react"
 
@@ -14,11 +15,13 @@ export default function ImagesPage() {
   }
 
   return (
-    <div className="container mx-auto p-6 space-y-8">
-      <div className="text-center space-y-2">
-        <h1 className="text-3xl font-bold">Image Caption Generator</h1>
-        <p className="text-muted-foreground">Generate AI-powered captions and hashtags for your images</p>
-      </div>
+    <>
+      <BackButton to="/" label="Back to Dashboard" />
+      <div className="container mx-auto p-6 space-y-8">
+        <div className="text-center space-y-2">
+          <h1 className="text-3xl font-bold">Image Caption Generator</h1>
+          <p className="text-muted-foreground">Generate AI-powered captions and hashtags for your images</p>
+        </div>
 
       <Tabs defaultValue="upload" className="space-y-6">
         <TabsList className="grid w-full grid-cols-2">
@@ -40,6 +43,7 @@ export default function ImagesPage() {
           <ImageGallery refresh={refreshKey} />
         </TabsContent>
       </Tabs>
-    </div>
+      </div>
+    </>
   )
 }

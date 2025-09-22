@@ -137,74 +137,61 @@ export function GmailSentimentAnalyzer() {
     }
   }
 
-  const fetchEmails = async () => {
-    setIsLoading(true)
-    try {
-      const response = await fetch('/api/google-drive/debug', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'test_auth' })
-      })
-
-      if (response.ok) {
-        const data = await response.json()
-        if (data.authenticated) {
-          toast({
-            title: "Gmail Connected",
-            description: "Successfully connected to Gmail",
-          })
-          setIsAuthenticated(true)
-        }
-      }
-    } catch (error) {
-      toast({
-        title: "Error",
-        description: "Failed to check Gmail connection",
-        variant: "destructive",
-      })
-    } finally {
-      setIsLoading(false)
-    }
-  }
 
   const loadEmails = async () => {
     setIsLoading(true)
     try {
-      // For now, we'll simulate Gmail emails since we need proper Gmail API setup
-      // In a real implementation, this would call the Gmail API
-      const mockEmails: GmailEmail[] = [
-        {
-          id: '1',
-          subject: 'Thank you for your help!',
-          from: 'colleague@company.com',
-          snippet: 'I really appreciate your assistance with the project. Your insights were incredibly helpful...',
-          date: '2024-01-15T10:30:00Z',
-          isSelected: false
-        },
-        {
-          id: '2',
-          subject: 'Project Update - Urgent',
-          from: 'manager@company.com',
-          snippet: 'We need to discuss the timeline for the upcoming deadline. Please review the attached documents...',
-          date: '2024-01-15T09:15:00Z',
-          isSelected: false
-        },
-        {
-          id: '3',
-          subject: 'Meeting Rescheduled',
-          from: 'team@company.com',
-          snippet: 'The weekly standup has been moved to 3 PM today. Please make sure to attend...',
-          date: '2024-01-15T08:45:00Z',
-          isSelected: false
-        }
-      ]
-
-      setEmails(mockEmails)
-      toast({
-        title: "Emails Loaded",
-        description: `Loaded ${mockEmails.length} emails from Gmail`,
+      // Fetch real emails from Gmail API
+      const response = await fetch('/api/sentiment/gmail', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          maxEmails: maxEmails,
+          markAsRead: false // Don't mark as read when just loading
+        })
       })
+
+      if (response.status === 401) {
+        toast({
+          title: "Authentication Required",
+          description: "Please authenticate with Gmail first",
+          variant: "destructive",
+        })
+        return
+      }
+
+      if (!response.ok) {
+        throw new Error('Failed to fetch emails')
+      }
+
+      const data = await response.json()
+
+      if (data.results && data.results.length > 0) {
+        // Convert API response to component format
+        const fetchedEmails: GmailEmail[] = data.results.map((result: any) => ({
+          id: result.email_id,
+          subject: result.subject,
+          from: result.from,
+          snippet: result.sentiment_analysis?.reasoning?.substring(0, 150) + '...' || 'No preview available',
+          date: result.date,
+          isSelected: false
+        }))
+
+        setEmails(fetchedEmails)
+        toast({
+          title: "Emails Loaded",
+          description: `Loaded ${fetchedEmails.length} emails from Gmail`,
+        })
+      } else {
+        // No emails found
+        setEmails([])
+        toast({
+          title: "No Emails Found",
+          description: "No unread emails found in your Gmail account",
+        })
+      }
     } catch (error) {
+      console.error('Error loading emails:', error)
       toast({
         title: "Error",
         description: "Failed to load emails from Gmail",
@@ -336,7 +323,7 @@ export function GmailSentimentAnalyzer() {
               )}
             </div>
             <Button
-              onClick={needsReconnect ? handleGmailAuth : (isAuthenticated ? fetchEmails : handleGmailAuth)}
+              onClick={needsReconnect ? handleGmailAuth : (isAuthenticated ? loadEmails : handleGmailAuth)}
               disabled={isLoading}
               variant={needsReconnect ? "destructive" : (isAuthenticated ? "outline" : "default")}
             >
@@ -353,7 +340,7 @@ export function GmailSentimentAnalyzer() {
               ) : isAuthenticated ? (
                 <>
                   <RefreshCw className="h-4 w-4 mr-2" />
-                  Refresh Connection
+                  Load Emails
                 </>
               ) : (
                 <>
