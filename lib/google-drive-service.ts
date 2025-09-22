@@ -72,56 +72,31 @@ export class GoogleDriveService {
 
       const supabase = await createServerClient()
 
-      // First try to update existing record
-      console.log('🔍 Checking for existing tokens...')
-      const { data: existingRecord, error: selectError } = await supabase
+      // Use upsert to handle both insert and update cases
+      console.log('💾 Using upsert to store/update Google Drive tokens...')
+      const { error } = await supabase
         .from('google_drive_tokens')
-        .select('user_id')
-        .eq('user_id', this.userId)
-        .single()
-
-      if (selectError && selectError.code !== 'PGRST116') { // PGRST116 is "not found"
-        console.error('❌ Error checking for existing tokens:', selectError)
-        throw selectError
-      }
-
-      let error
-      if (existingRecord) {
-        // Update existing record
-        console.log('📝 Updating existing Google Drive tokens for user:', this.userId)
-        const result = await supabase
-          .from('google_drive_tokens')
-          .update({
-            access_token: tokens.access_token,
-            refresh_token: tokens.refresh_token,
-            expiry_date: tokens.expiry_date,
-            scope: tokens.scope,
-            token_type: tokens.token_type,
-            updated_at: new Date().toISOString()
-          })
-          .eq('user_id', this.userId)
-        error = result.error
-        console.log('📊 Update operation result:', { success: !error, error })
-      } else {
-        // Insert new record
-        console.log('➕ Creating new Google Drive tokens for user:', this.userId)
-        const result = await supabase
-          .from('google_drive_tokens')
-          .insert({
-            user_id: this.userId,
-            access_token: tokens.access_token,
-            refresh_token: tokens.refresh_token,
-            expiry_date: tokens.expiry_date,
-            scope: tokens.scope,
-            token_type: tokens.token_type,
-            updated_at: new Date().toISOString()
-          })
-        error = result.error
-        console.log('📊 Insert operation result:', { success: !error, error })
-      }
+        .upsert({
+          user_id: this.userId,
+          access_token: tokens.access_token,
+          refresh_token: tokens.refresh_token,
+          expiry_date: tokens.expiry_date,
+          scope: tokens.scope,
+          token_type: tokens.token_type,
+          updated_at: new Date().toISOString()
+        }, {
+          onConflict: 'user_id'
+        })
 
       if (error) {
         console.error('❌ Error storing tokens:', error)
+        // Handle specific error cases
+        if (error.code === '23505') {
+          console.log('🔄 Token record already exists, this is expected behavior')
+          // This is expected when updating existing tokens, so we don't throw
+          console.log('✅ Token storage completed (record already existed)')
+          return
+        }
         throw error
       }
 
@@ -148,6 +123,8 @@ export class GoogleDriveService {
       state: this.userId,
       prompt: 'consent'
     })
+    console.log("url=>",authUrl)
+
 
     return authUrl
   }

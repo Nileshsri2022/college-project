@@ -2,8 +2,9 @@
 
 import { SentimentAnalyzer } from "@/components/sentiment-analyzer"
 import { SentimentDashboard } from "@/components/sentiment-dashboard"
+import { GmailSentimentAnalyzer } from "@/components/gmail-sentiment-analyzer"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Brain, BarChart3 } from "lucide-react"
+import { Brain, BarChart3, Mail } from "lucide-react"
 
 export default function SentimentPage() {
   return (
@@ -14,10 +15,14 @@ export default function SentimentPage() {
       </div>
 
       <Tabs defaultValue="analyzer" className="space-y-6">
-        <TabsList className="grid w-full grid-cols-2">
+        <TabsList className="grid w-full grid-cols-3">
           <TabsTrigger value="analyzer" className="flex items-center gap-2">
             <Brain className="h-4 w-4" />
-            Analyzer
+            Manual Analyzer
+          </TabsTrigger>
+          <TabsTrigger value="gmail" className="flex items-center gap-2">
+            <Mail className="h-4 w-4" />
+            Gmail Integration
           </TabsTrigger>
           <TabsTrigger value="dashboard" className="flex items-center gap-2">
             <BarChart3 className="h-4 w-4" />
@@ -27,6 +32,10 @@ export default function SentimentPage() {
 
         <TabsContent value="analyzer">
           <SentimentAnalyzer />
+        </TabsContent>
+
+        <TabsContent value="gmail">
+          <GmailSentimentAnalyzer />
         </TabsContent>
 
         <TabsContent value="dashboard">

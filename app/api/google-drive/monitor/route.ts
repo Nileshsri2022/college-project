@@ -127,9 +127,16 @@ export async function GET(request: NextRequest) {
   try {
     console.log('\n🔍 === GOOGLE DRIVE MONITOR REQUEST STARTED ===')
     console.log(`⏰ Request time: ${new Date().toISOString()}`)
+    console.log('🧪 MONITOR ROUTE TEST - This should always be visible')
+    console.log('📋 Request URL:', request.url)
+    console.log('🔍 Request method:', request.method)
+    console.log('🌐 Request headers:', Object.fromEntries(request.headers.entries()))
 
     const supabase = await createClient()
+    console.log('🔐 Supabase client created')
+
     const { data: { user }, error: authError } = await supabase.auth.getUser()
+    console.log('👤 Auth check result:', { user: !!user, error: authError?.message })
 
     if (authError || !user) {
       console.error('❌ Authentication failed:', authError)
@@ -144,23 +151,42 @@ export async function GET(request: NextRequest) {
 
     console.log(`📁 Folder ID: ${folderId}`)
     console.log(`🤖 Process Images: ${processImages}`)
+    console.log('🔍 Search params:', Object.fromEntries(searchParams.entries()))
 
     if (!folderId) {
       console.error('❌ Folder ID is required but not provided')
       return NextResponse.json({ error: 'Folder ID is required' }, { status: 400 })
     }
 
+    console.log('✅ Folder ID validation passed')
+
     // Initialize Google Drive service
+    console.log('🚗 Initializing Google Drive service...')
     const driveService = new GoogleDriveService(user.id)
+    console.log('✅ Google Drive service initialized')
 
     // Check if user is authenticated
+    console.log('🔐 Checking Google Drive authentication...')
     const isAuthenticated = await driveService.isAuthenticated()
+    console.log('🔐 Authentication status:', isAuthenticated)
+
     if (!isAuthenticated) {
+      console.error('❌ Not authenticated with Google Drive')
       return NextResponse.json({ error: 'Not authenticated with Google Drive' }, { status: 401 })
     }
 
+    console.log('✅ Google Drive authentication confirmed')
+
     // Get files from the folder
+    console.log('📂 Getting files from Google Drive folder...')
     const files = await driveService.listFiles(folderId)
+    console.log(`📂 Files retrieved from Google Drive: ${files.length}`)
+    console.log('📋 Files details:', files.map(f => ({
+      id: f.id,
+      name: f.name,
+      mimeType: f.mimeType,
+      size: f.size
+    })))
 
     let processedResults: any[] = []
 
@@ -170,19 +196,28 @@ export async function GET(request: NextRequest) {
 
       // Get already processed file IDs to avoid duplicates
       console.log('🔍 Checking for already processed images...')
-      const { data: existingImages } = await supabase
+      console.log('🗄️ Querying image_captions table...')
+      const { data: existingImages, error: dbError } = await supabase
         .from('image_captions')
         .select('google_drive_file_id')
         .eq('user_id', user.id)
         .not('google_drive_file_id', 'is', null)
+
+      console.log('🗄️ Database query result:', {
+        dataCount: existingImages?.length || 0,
+        error: dbError?.message,
+        sampleData: existingImages?.slice(0, 3)
+      })
 
       const processedFileIds = new Set(
         existingImages?.map(img => img.google_drive_file_id) || []
       )
 
       console.log(`✅ Found ${processedFileIds.size} already processed images`)
+      console.log('📋 Processed file IDs:', Array.from(processedFileIds).slice(0, 5))
 
       // Filter out already processed files
+      console.log('🔍 Filtering unprocessed files...')
       const unprocessedFiles = files.filter(file => !processedFileIds.has(file.id))
 
       console.log(`🆕 Found ${unprocessedFiles.length} unprocessed images to process`)
@@ -190,6 +225,14 @@ export async function GET(request: NextRequest) {
         id: f.id,
         name: f.name,
         mimeType: f.mimeType
+      })))
+
+      // Also log all files for comparison
+      console.log('📋 All files in folder:', files.map(f => ({
+        id: f.id,
+        name: f.name,
+        mimeType: f.mimeType,
+        isProcessed: processedFileIds.has(f.id)
       })))
 
       // Process unprocessed images

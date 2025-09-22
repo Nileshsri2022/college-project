@@ -10,8 +10,11 @@ export default async function HomePage() {
     error,
   } = await supabase.auth.getUser()
 
-  console.log("[v0] Auth check - User:", user?.id, "Error:", error?.message)
-
+  if (error) {
+    console.log("[v0] Auth check - User:", user?.id, "Error:", error.message)
+  } else {
+    console.log("[v0] Auth check - User:", user?.id, "Status: authenticated")
+  }
   if (error || !user) {
     redirect("/auth/login")
   }
