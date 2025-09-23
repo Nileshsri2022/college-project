@@ -206,6 +206,13 @@ export class GmailService {
     const hasGmailMetadata = currentScopes.includes('https://www.googleapis.com/auth/gmail.metadata')
     const hasGmailModify = currentScopes.includes('https://www.googleapis.com/auth/gmail.modify')
 
+    console.log('🔍 Current Gmail scopes:', currentScopes)
+    console.log('📊 Scope analysis:', {
+      hasGmailReadOnly,
+      hasGmailMetadata,
+      hasGmailModify
+    })
+
     // Check if we have at least one Gmail scope
     // Note: gmail.modify scope includes gmail.readonly permissions
     if (!hasGmailReadOnly && !hasGmailMetadata && !hasGmailModify) {
@@ -217,16 +224,14 @@ export class GmailService {
       )
     }
 
-    // Warn if using metadata-only scope (limited functionality)
-    if (hasGmailMetadata && !hasGmailReadOnly) {
-      console.warn('⚠️ Using Gmail metadata scope only - limited functionality available')
-      console.warn('📝 Gmail metadata scope does not support search queries')
-      console.warn('📝 Will use client-side filtering for unread emails')
-    }
-
-    // If user has both scopes, prioritize readonly for better functionality
-    if (hasGmailReadOnly && hasGmailMetadata) {
-      console.log('📧 User has both Gmail scopes - prioritizing readonly for search functionality')
+    // Gmail API scope priority: modify > readonly > metadata
+    // If we have modify scope, it should take precedence
+    if (hasGmailModify) {
+      console.log('✅ Using Gmail modify scope - full functionality available')
+    } else if (hasGmailReadOnly) {
+      console.log('✅ Using Gmail readonly scope - search functionality available')
+    } else if (hasGmailMetadata) {
+      console.log('⚠️ Using Gmail metadata scope only - limited functionality (no search queries)')
     }
 
     return this.oauth2Client
@@ -244,20 +249,41 @@ export class GmailService {
       const hasGmailMetadata = currentScopes.includes('https://www.googleapis.com/auth/gmail.metadata')
       const hasGmailModify = currentScopes.includes('https://www.googleapis.com/auth/gmail.modify')
 
+      console.log('📧 Available scopes for listEmails:', { hasGmailReadOnly, hasGmailMetadata, hasGmailModify })
+
       let messages: any[] = []
 
-      if (hasGmailReadOnly || hasGmailModify) {
-        // Use search functionality with Gmail readonly or modify scope (preferred)
-        // Note: gmail.modify includes readonly permissions
-        console.log('📧 Using Gmail scope with search functionality')
+      // Gmail API scope priority: modify > readonly > metadata
+      if (hasGmailModify) {
+        // Use modify scope - includes full search functionality
+        console.log('📧 Using Gmail modify scope with full search functionality')
+        try {
+          const response = await gmail.users.messages.list({
+            userId: 'me',
+            maxResults: maxResults,
+            q: 'is:unread' // Only fetch unread emails for sentiment analysis
+          })
+          messages = response.data.messages || []
+          console.log(`📧 Found ${messages.length} unread emails using modify scope search`)
+        } catch (error) {
+          console.warn('❌ Modify scope search failed, falling back to readonly approach:', error)
+          // Fall through to readonly approach
+        }
+      }
+
+      if (messages.length === 0 && hasGmailReadOnly) {
+        // Use readonly scope - full search functionality
+        console.log('📧 Using Gmail readonly scope with search functionality')
         const response = await gmail.users.messages.list({
           userId: 'me',
           maxResults: maxResults,
           q: 'is:unread' // Only fetch unread emails for sentiment analysis
         })
         messages = response.data.messages || []
-        console.log(`📧 Found ${messages.length} unread emails using search`)
-      } else if (hasGmailMetadata) {
+        console.log(`📧 Found ${messages.length} unread emails using readonly scope search`)
+      }
+
+      if (messages.length === 0 && hasGmailMetadata) {
         // Use metadata scope - get recent messages and filter client-side
         console.log('📧 Using Gmail metadata scope - fetching recent messages')
         const response = await gmail.users.messages.list({
@@ -293,7 +319,9 @@ export class GmailService {
 
         messages = unreadMessages
         console.log(`📧 Found ${messages.length} unread emails using metadata filtering`)
-      } else {
+      }
+
+      if (messages.length === 0) {
         throw new Error('No Gmail scopes available for reading emails. Please ensure you have at least one of: gmail.readonly, gmail.modify, or gmail.metadata scopes.')
       }
 

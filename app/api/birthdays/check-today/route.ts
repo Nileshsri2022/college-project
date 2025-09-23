@@ -56,119 +56,44 @@ export async function POST() {
 
     for (const birthday of todaysBirthdays || []) {
       try {
-        console.log(`[v0] Processing birthday for ${birthday.person_name}...`)
-        console.log(`[v0] Birthday data:`, {
-          id: birthday.id,
-          person_name: birthday.person_name,
-          email: birthday.email,
-          phone: birthday.phone,
-          notification_preference: birthday.notification_preference,
-          profile_email: birthday.profile_email,
-          user_id: birthday.user_id,
-        })
-
+        // Generate a preview message (but don't send it)
         const personalizedMessage = await generateBirthdayMessage(birthday.person_name)
         const fullMessage = `Happy Birthday ${birthday.person_name}! ${personalizedMessage}`
-        console.log(`[v0] Generated message for ${birthday.person_name}: ${fullMessage}`)
 
         const userEmail = birthday.profile_email || "unknown@email.com"
-        console.log(`[v0] User email: ${userEmail}, Recipient email: ${birthday.email}`)
 
-        console.log(`[v0] Creating agent task for ${birthday.person_name}...`)
-        const taskData = {
-          birthday_id: birthday.id,
-          person_name: birthday.person_name,
-          message: fullMessage,
-          notification_preference: birthday.notification_preference,
-          recipient_email: birthday.email,
-          recipient_phone: birthday.phone,
-          user_email: userEmail,
-        }
-        console.log(`[v0] Task data:`, taskData)
-
-        // Create agent task for sending notification
-        const { data: task, error: taskError } = await supabase
-          .from("agent_tasks")
-          .insert({
-            user_id: birthday.user_id,
-            task_type: "birthday_reminder",
-            task_status: "pending",
-            task_data: taskData,
-            scheduled_for: new Date().toISOString(),
-          })
-          .select()
-          .single()
-
-        if (taskError) {
-          console.error(`[v0] Error creating task for ${birthday.person_name}:`, taskError)
-          continue
-        }
-
-        console.log(`[v0] Successfully created task ${task.id} for ${birthday.person_name}`)
+        // Single consolidated log per birthday
+        console.log(`[v0] Birthday found: ${birthday.person_name} (${birthday.email}) - Message: "${fullMessage.substring(0, 50)}..." [LOGGED ONLY]`)
 
         results.push({
           birthday: birthday.person_name,
           message: fullMessage,
-          task_id: task.id,
           notification_method: birthday.notification_preference,
+          status: "logged_only", // Indicate this was only logged, not sent
+          note: "Use 'Send Pending Notifications' to actually send this message"
         })
       } catch (messageError) {
-        console.error(`[v0] Error generating message for ${birthday.person_name}:`, messageError)
+        console.error(`[v0] Error generating preview message for ${birthday.person_name}:`, messageError)
         const fallbackMessage = `Happy Birthday ${birthday.person_name}! Wishing you a wonderful day filled with joy and celebration!`
-        const userEmail = birthday.profile_email || "unknown@email.com"
 
-        const { data: task } = await supabase
-          .from("agent_tasks")
-          .insert({
-            user_id: birthday.user_id,
-            task_type: "birthday_reminder",
-            task_status: "pending",
-            task_data: {
-              birthday_id: birthday.id,
-              person_name: birthday.person_name,
-              message: fallbackMessage,
-              notification_preference: birthday.notification_preference,
-              recipient_email: birthday.email,
-              recipient_phone: birthday.phone,
-              user_email: userEmail,
-            },
-            scheduled_for: new Date().toISOString(),
-          })
-          .select()
-          .single()
+        console.log(`[v0] Birthday found: ${birthday.person_name} (fallback message) [LOGGED ONLY]`)
 
         results.push({
           birthday: birthday.person_name,
           message: fallbackMessage,
-          task_id: task?.id,
           notification_method: birthday.notification_preference,
+          status: "logged_only",
           fallback: true,
+          note: "Use 'Send Pending Notifications' to actually send this message"
         })
       }
     }
 
-    if (results.length > 0) {
-      console.log(`[v0] Auto-triggering notification sending for ${results.length} birthday tasks`)
-
-      try {
-        const notificationResult = await processNotificationTasks()
-
-        if (notificationResult.success) {
-          console.log(`[v0] Auto-triggered notifications successfully:`, notificationResult)
-        } else {
-          console.error(`[v0] Notification processing failed:`, notificationResult.error)
-        }
-      } catch (autoSendError) {
-        console.error(`[v0] Failed to auto-trigger notifications:`, autoSendError)
-      }
-    } else {
-      console.log("[v0] No birthday tasks created, skipping auto-trigger")
-    }
-
-    console.log(`[v0] Birthday check process completed. Results:`, results)
+    console.log(`[v0] Birthday check process completed. Found ${results.length} birthdays (LOGGED ONLY - no emails sent)`)
     return NextResponse.json({
-      message: `Found ${todaysBirthdays?.length || 0} birthdays today${results.length > 0 ? " and auto-triggered email sending" : ""}`,
+      message: `Found ${todaysBirthdays?.length || 0} birthdays today (logged only - no emails sent)`,
       results,
+      note: "Use 'Send Pending Notifications' button to actually send birthday emails"
     })
   } catch (error) {
     console.error("[v0] Error in birthday check:", error)

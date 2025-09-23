@@ -311,4 +311,202 @@ export class GoogleDriveService {
       throw error
     }
   }
+
+  async setupFolderMonitoring(folderId: string, folderName: string, imageFormats: string[] = ['.jpg', '.jpeg', '.png', '.gif', '.webp']): Promise<void> {
+    try {
+      const supabase = await createServerClient()
+
+      // Check if folder is already being monitored
+      const { data: existingFolder } = await supabase
+        .from('google_drive_monitored_folders')
+        .select('*')
+        .eq('user_id', this.userId)
+        .eq('folder_id', folderId)
+        .single()
+
+      if (existingFolder) {
+        // Update existing folder
+        await supabase
+          .from('google_drive_monitored_folders')
+          .update({
+            folder_name: folderName,
+            image_formats: imageFormats,
+            is_active: true,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', existingFolder.id)
+
+        console.log(`✅ Updated monitoring for folder: ${folderName}`)
+      } else {
+        // Create new monitored folder
+        await supabase
+          .from('google_drive_monitored_folders')
+          .insert({
+            user_id: this.userId,
+            folder_id: folderId,
+            folder_name: folderName,
+            image_formats: imageFormats,
+            is_active: true
+          })
+
+        console.log(`✅ Started monitoring folder: ${folderName}`)
+      }
+
+      // Set up webhook for real-time notifications
+      await this.setupWebhookForFolder(folderId, folderName, supabase)
+
+    } catch (error) {
+      console.error('Error setting up folder monitoring:', error)
+      throw error
+    }
+  }
+
+  async setupWebhookForFolder(folderId: string, folderName: string, supabase: any): Promise<void> {
+    try {
+      const auth = await this.getAuthenticatedClient()
+      const drive = google.drive({ version: 'v3', auth })
+
+      // Create webhook channel
+      // Google Drive requires HTTPS for webhooks, but for local development we can use polling instead
+      const isLocalhost = process.env.NEXTAUTH_URL?.includes('localhost')
+      const baseUrl = isLocalhost
+        ? process.env.NEXTAUTH_URL?.replace('http://', 'https://') || 'https://localhost:3000'
+        : process.env.NEXTAUTH_URL || 'http://localhost:3000'
+
+      // For localhost, we'll use polling instead of webhooks to avoid HTTPS requirement
+      if (isLocalhost) {
+        console.log('🔄 Localhost detected - using polling instead of webhooks')
+        console.log('💡 For webhooks, use ngrok: node scripts/setup-ngrok.js')
+
+        // Store webhook info but mark as using polling
+        await supabase
+          .from('google_drive_monitored_folders')
+          .update({
+            webhook_channel_id: `polling-${folderId}-${Date.now()}`,
+            webhook_resource_id: 'polling',
+            webhook_expiration: new Date(Date.now() + 24 * 60 * 60 * 1000), // 24 hours from now
+            updated_at: new Date().toISOString()
+          })
+          .eq('user_id', this.userId)
+          .eq('folder_id', folderId)
+
+        console.log('✅ Folder monitoring set up with polling mode')
+        return
+      }
+
+      const channel = {
+        id: `folder-${folderId}-${Date.now()}`,
+        type: 'web_hook',
+        address: `${baseUrl}/api/google-drive/webhook`,
+        payload: true
+      }
+
+      const response = await drive.changes.watch({
+        requestBody: channel,
+        pageToken: '1' // Start watching from now
+      })
+
+      // Store webhook information
+      await supabase
+        .from('google_drive_monitored_folders')
+        .update({
+          webhook_channel_id: response.data.id,
+          webhook_resource_id: response.data.resourceId,
+          webhook_expiration: new Date(response.data.expiration!),
+          updated_at: new Date().toISOString()
+        })
+        .eq('user_id', this.userId)
+        .eq('folder_id', folderId)
+
+      console.log(`✅ Webhook set up for folder: ${folderName}`)
+      console.log(`📡 Channel ID: ${response.data.id}`)
+      console.log(`⏰ Expires: ${response.data.expiration}`)
+
+    } catch (error) {
+      console.error('Error setting up webhook:', error)
+      throw error
+    }
+  }
+
+  async stopFolderMonitoring(folderId: string): Promise<void> {
+    try {
+      const supabase = await createServerClient()
+
+      // Get webhook information
+      const { data: folder } = await supabase
+        .from('google_drive_monitored_folders')
+        .select('*')
+        .eq('user_id', this.userId)
+        .eq('folder_id', folderId)
+        .single()
+
+      if (folder && folder.webhook_channel_id) {
+        // Stop the webhook
+        await this.removeWebhook(folder.webhook_channel_id)
+      }
+
+      // Mark folder as inactive
+      await supabase
+        .from('google_drive_monitored_folders')
+        .update({
+          is_active: false,
+          updated_at: new Date().toISOString()
+        })
+        .eq('user_id', this.userId)
+        .eq('folder_id', folderId)
+
+      console.log(`✅ Stopped monitoring folder: ${folder?.folder_name}`)
+
+    } catch (error) {
+      console.error('Error stopping folder monitoring:', error)
+      throw error
+    }
+  }
+
+  async getMonitoredFolders(): Promise<any[]> {
+    try {
+      const supabase = await createServerClient()
+
+      const { data: folders, error } = await supabase
+        .from('google_drive_monitored_folders')
+        .select('*')
+        .eq('user_id', this.userId)
+        .eq('is_active', true)
+
+      if (error) {
+        console.error('Error getting monitored folders:', error)
+        return []
+      }
+
+      return folders || []
+
+    } catch (error) {
+      console.error('Error getting monitored folders:', error)
+      return []
+    }
+  }
+
+  async getProcessingStatus(): Promise<any[]> {
+    try {
+      const supabase = await createServerClient()
+
+      const { data: images, error } = await supabase
+        .from('image_captions')
+        .select('*')
+        .eq('user_id', this.userId)
+        .in('processing_status', ['processing', 'pending'])
+        .order('created_at', { ascending: false })
+
+      if (error) {
+        console.error('Error getting processing status:', error)
+        return []
+      }
+
+      return images || []
+
+    } catch (error) {
+      console.error('Error getting processing status:', error)
+      return []
+    }
+  }
 }

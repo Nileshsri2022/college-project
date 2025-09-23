@@ -78,6 +78,23 @@ interface FolderMonitorSettings {
   imageFormats: string[]
 }
 
+interface MonitoredFolder {
+  id: string
+  folder_id: string
+  folder_name: string
+  image_formats: string[]
+  is_active: boolean
+  created_at: string
+}
+
+interface ProcessingImage {
+  id: string
+  image_name: string
+  processing_status: 'processing' | 'pending' | 'completed' | 'failed'
+  created_at: string
+  updated_at: string
+  generated_caption?: string
+}
 
 const DEFAULT_SETTINGS: FolderMonitorSettings = {
   folderId: '',
@@ -103,10 +120,16 @@ export function ImageUploader() {
   const [authLoading, setAuthLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [loadingImages, setLoadingImages] = useState<string[]>([])
+  const [availableFolders, setAvailableFolders] = useState<GoogleDriveFile[]>([])
+  const [monitoredFolders, setMonitoredFolders] = useState<MonitoredFolder[]>([])
+  const [processingImages, setProcessingImages] = useState<ProcessingImage[]>([])
+  const [showFolderDialog, setShowFolderDialog] = useState(false)
+  const [selectedFolder, setSelectedFolder] = useState<GoogleDriveFile | null>(null)
 
   const { toast } = useToast()
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null)
   const processedFilesRef = useRef<Set<string>>(new Set())
+  const statusPollingRef = useRef<NodeJS.Timeout | null>(null)
 
   // Initialize Google Drive service
   useEffect(() => {
@@ -438,8 +461,66 @@ export function ImageUploader() {
     }
   }
 
-  // Select folder
-  const selectFolder = async () => {
+  // Load available folders from Google Drive
+  const loadFolders = async () => {
+    if (!isAuthenticated) return
+
+    try {
+      const response = await fetch('/api/google-drive/folders')
+      if (!response.ok) {
+        throw new Error('Failed to load folders')
+      }
+
+      const data = await response.json()
+      setAvailableFolders(data.folders || [])
+      setMonitoredFolders(data.monitoredFolders || [])
+    } catch (error) {
+      console.error('Error loading folders:', error)
+      toast({
+        title: "Error",
+        description: "Failed to load Google Drive folders",
+        variant: "destructive",
+      })
+    }
+  }
+
+  // Load processing status
+  const loadProcessingStatus = async () => {
+    try {
+      const response = await fetch('/api/google-drive/processing-status')
+      if (!response.ok) {
+        throw new Error('Failed to load processing status')
+      }
+
+      const data = await response.json()
+      setProcessingImages(data.images || [])
+    } catch (error) {
+      console.error('Error loading processing status:', error)
+    }
+  }
+
+  // Start status polling
+  const startStatusPolling = useCallback(() => {
+    if (statusPollingRef.current) {
+      clearInterval(statusPollingRef.current)
+    }
+
+    statusPollingRef.current = setInterval(() => {
+      loadProcessingStatus()
+      loadFolders() // Also check for new folders
+    }, 5000) // Poll every 5 seconds
+  }, [])
+
+  // Stop status polling
+  const stopStatusPolling = useCallback(() => {
+    if (statusPollingRef.current) {
+      clearInterval(statusPollingRef.current)
+      statusPollingRef.current = null
+    }
+  }, [])
+
+  // Select folder from dialog
+  const selectFolder = async (folder: GoogleDriveFile) => {
     if (!isAuthenticated) {
       toast({
         title: "Authentication Required",
@@ -450,21 +531,69 @@ export function ImageUploader() {
     }
 
     try {
-      // Use Google Picker API or show folder selection dialog
-      // For now, we'll use a simple input dialog
-      const folderId = prompt('Enter Google Drive folder ID:')
-      if (folderId) {
-        setSettings(prev => ({ ...prev, folderId, folderName: 'Selected Folder' }))
-        toast({
-          title: "Folder Selected",
-          description: "Google Drive folder has been selected for monitoring",
+      const response = await fetch('/api/google-drive/folders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          folderId: folder.id,
+          folderName: folder.name,
+          imageFormats: settings.imageFormats
         })
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to setup folder monitoring')
       }
+
+      const data = await response.json()
+
+      setSettings(prev => ({ ...prev, folderId: folder.id, folderName: folder.name }))
+      setShowFolderDialog(false)
+      setSelectedFolder(null)
+
+      toast({
+        title: "Folder Monitoring Started",
+        description: `Now monitoring ${folder.name} for new images`,
+      })
+
+      // Reload folders and start monitoring
+      await loadFolders()
+      startStatusPolling()
+
     } catch (error) {
       console.error('Folder selection error:', error)
       toast({
         title: "Selection Error",
-        description: "Failed to select folder",
+        description: "Failed to setup folder monitoring",
+        variant: "destructive",
+      })
+    }
+  }
+
+  // Stop monitoring a folder
+  const stopMonitoringFolder = async (folderId: string) => {
+    try {
+      const response = await fetch(`/api/google-drive/folders?folderId=${folderId}`, {
+        method: 'DELETE'
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to stop folder monitoring')
+      }
+
+      toast({
+        title: "Monitoring Stopped",
+        description: "Folder monitoring has been stopped",
+      })
+
+      // Reload folders
+      await loadFolders()
+
+    } catch (error) {
+      console.error('Error stopping monitoring:', error)
+      toast({
+        title: "Error",
+        description: "Failed to stop folder monitoring",
         variant: "destructive",
       })
     }
@@ -537,6 +666,18 @@ export function ImageUploader() {
     maxFiles: 1,
     maxSize: 10 * 1024 * 1024, // 10MB
   })
+
+  // Load folders when authenticated
+  useEffect(() => {
+    if (isAuthenticated) {
+      loadFolders()
+      startStatusPolling()
+    } else {
+      stopStatusPolling()
+    }
+
+    return () => stopStatusPolling()
+  }, [isAuthenticated, startStatusPolling, stopStatusPolling])
 
   const copyToClipboard = async (text: string) => {
     try {
@@ -759,7 +900,7 @@ export function ImageUploader() {
                           readOnly
                         />
                         <Button
-                          onClick={selectFolder}
+                          onClick={() => setShowFolderDialog(true)}
                           disabled={!isAuthenticated}
                           variant="outline"
                         >
@@ -822,6 +963,53 @@ export function ImageUploader() {
                   </div>
                 </DialogContent>
               </Dialog>
+
+              {/* Folder Selection Dialog */}
+              <Dialog open={showFolderDialog} onOpenChange={setShowFolderDialog}>
+                <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
+                  <DialogHeader>
+                    <DialogTitle>Select Google Drive Folder</DialogTitle>
+                    <DialogDescription>
+                      Choose a folder to monitor for new images
+                    </DialogDescription>
+                  </DialogHeader>
+                  <div className="space-y-4">
+                    {availableFolders.length === 0 ? (
+                      <div className="text-center py-8">
+                        <FolderOpen className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
+                        <p className="text-muted-foreground">No folders found</p>
+                        <p className="text-sm text-muted-foreground">Make sure you have folders in your Google Drive</p>
+                      </div>
+                    ) : (
+                      <div className="grid gap-2 max-h-96 overflow-y-auto">
+                        {availableFolders.map((folder) => (
+                          <Card key={folder.id} className="cursor-pointer hover:bg-muted/50 transition-colors">
+                            <CardContent className="p-4">
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-3">
+                                  <FolderOpen className="h-5 w-5 text-blue-500" />
+                                  <div>
+                                    <h4 className="font-medium">{folder.name}</h4>
+                                    <p className="text-sm text-muted-foreground">
+                                      Modified: {new Date(folder.modifiedTime).toLocaleDateString()}
+                                    </p>
+                                  </div>
+                                </div>
+                                <Button
+                                  onClick={() => selectFolder(folder)}
+                                  size="sm"
+                                >
+                                  Select
+                                </Button>
+                              </div>
+                            </CardContent>
+                          </Card>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </DialogContent>
+              </Dialog>
             </div>
           </div>
         </CardHeader>
@@ -845,6 +1033,10 @@ export function ImageUploader() {
                     <Clock className="h-3 w-3" />
                     {settings.pollingInterval}s interval
                   </Badge>
+                  <Badge variant="secondary" className="flex items-center gap-1">
+                    <Monitor className="h-3 w-3" />
+                    Polling Mode
+                  </Badge>
                 </div>
                 <div className="flex gap-2">
                   {!isMonitoring ? (
@@ -860,6 +1052,28 @@ export function ImageUploader() {
                   )}
                 </div>
               </div>
+
+              {/* Polling mode notification */}
+              <Alert>
+                <Monitor className="h-4 w-4" />
+                <AlertDescription>
+                  <strong>Polling Mode:</strong> Currently checking for new images every {settings.pollingInterval} seconds.
+                  For instant notifications when files are added, use ngrok to enable HTTPS webhooks.
+                  <Button
+                    variant="link"
+                    size="sm"
+                    className="p-0 h-auto ml-2"
+                    onClick={() => {
+                      toast({
+                        title: "ngrok Setup",
+                        description: "Run: node scripts/setup-ngrok.js in your terminal",
+                      })
+                    }}
+                  >
+                    Setup ngrok →
+                  </Button>
+                </AlertDescription>
+              </Alert>
 
               {isMonitoring && (
                 <div className="space-y-2">
@@ -880,6 +1094,7 @@ export function ImageUploader() {
         <TabsList>
           <TabsTrigger value="upload">Manual Upload</TabsTrigger>
           <TabsTrigger value="processed">Processed Images ({processedImages.length})</TabsTrigger>
+          <TabsTrigger value="processing">Processing Status ({processingImages.length})</TabsTrigger>
         </TabsList>
 
         <TabsContent value="upload" className="space-y-4">
@@ -1123,6 +1338,119 @@ export function ImageUploader() {
                       </CardContent>
                     </Card>
                   ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="processing" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle>Processing Status</CardTitle>
+                  <CardDescription>Real-time status of images being processed from Google Drive</CardDescription>
+                </div>
+                <Button onClick={loadProcessingStatus} variant="outline" size="sm">
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                  Refresh
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {processingImages.length === 0 ? (
+                <div className="text-center py-8">
+                  <Clock className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
+                  <p className="text-muted-foreground">No images currently processing</p>
+                  <p className="text-sm text-muted-foreground">Images will appear here when processing starts</p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {/* Summary Stats */}
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <Card>
+                      <CardContent className="p-4 text-center">
+                        <div className="text-2xl font-bold text-blue-600">
+                          {processingImages.filter(img => img.processing_status === 'processing').length}
+                        </div>
+                        <div className="text-sm text-muted-foreground">Processing</div>
+                      </CardContent>
+                    </Card>
+                    <Card>
+                      <CardContent className="p-4 text-center">
+                        <div className="text-2xl font-bold text-yellow-600">
+                          {processingImages.filter(img => img.processing_status === 'pending').length}
+                        </div>
+                        <div className="text-sm text-muted-foreground">Pending</div>
+                      </CardContent>
+                    </Card>
+                    <Card>
+                      <CardContent className="p-4 text-center">
+                        <div className="text-2xl font-bold text-green-600">
+                          {processingImages.filter(img => img.processing_status === 'completed').length}
+                        </div>
+                        <div className="text-sm text-muted-foreground">Completed</div>
+                      </CardContent>
+                    </Card>
+                    <Card>
+                      <CardContent className="p-4 text-center">
+                        <div className="text-2xl font-bold text-red-600">
+                          {processingImages.filter(img => img.processing_status === 'failed').length}
+                        </div>
+                        <div className="text-sm text-muted-foreground">Failed</div>
+                      </CardContent>
+                    </Card>
+                  </div>
+
+                  {/* Processing Images List */}
+                  <div className="space-y-2">
+                    {processingImages.map((image) => (
+                      <Card key={image.id} className="overflow-hidden">
+                        <CardContent className="p-4">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                              <div className="flex-shrink-0">
+                                {image.processing_status === 'processing' && (
+                                  <Loader2 className="h-5 w-5 animate-spin text-blue-500" />
+                                )}
+                                {image.processing_status === 'pending' && (
+                                  <Clock className="h-5 w-5 text-yellow-500" />
+                                )}
+                                {image.processing_status === 'completed' && (
+                                  <CheckCircle className="h-5 w-5 text-green-500" />
+                                )}
+                                {image.processing_status === 'failed' && (
+                                  <AlertCircle className="h-5 w-5 text-red-500" />
+                                )}
+                              </div>
+                              <div>
+                                <h4 className="font-medium">{image.image_name}</h4>
+                                <p className="text-sm text-muted-foreground">
+                                  {image.processing_status === 'completed' && image.generated_caption
+                                    ? image.generated_caption.substring(0, 100) + '...'
+                                    : `Status: ${image.processing_status}`
+                                  }
+                                </p>
+                                <p className="text-xs text-muted-foreground">
+                                  {new Date(image.created_at).toLocaleString()}
+                                </p>
+                              </div>
+                            </div>
+                            <Badge
+                              variant={
+                                image.processing_status === 'completed' ? 'default' :
+                                image.processing_status === 'processing' ? 'secondary' :
+                                image.processing_status === 'failed' ? 'destructive' : 'outline'
+                              }
+                            >
+                              {image.processing_status}
+                            </Badge>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
                 </div>
               )}
             </CardContent>

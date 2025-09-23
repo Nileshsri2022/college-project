@@ -17,6 +17,10 @@ export interface Birthday {
   phone?: string
   notification_preference: "email" | "whatsapp" | "both"
   is_active: boolean
+  email_status?: "pending" | "sent" | "failed"
+  last_email_attempt?: string
+  email_error_message?: string
+  email_message_id?: string
   created_at: string
   updated_at: string
 }

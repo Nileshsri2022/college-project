@@ -58,6 +58,8 @@ export async function GET(request: NextRequest) {
         scope: tokens.scope,
         token_type: tokens.token_type,
         updated_at: new Date().toISOString()
+      }, {
+        onConflict: 'user_id'
       })
 
     if (insertError) {

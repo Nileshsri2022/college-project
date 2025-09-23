@@ -7,6 +7,14 @@ import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
 import { ThemeToggle } from "@/components/theme-toggle"
 import { useTheme } from "next-themes"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import animationJson from './landing-animation.json';
 import {
   Calendar,
@@ -27,6 +35,7 @@ import Link from "next/link"
 import { createClient } from "@/lib/supabase/client"
 import { useRouter } from "next/navigation"
 import Lottie from 'lottie-react'
+import { ProfileModal } from "@/components/profile-modal"
 
 interface DashboardStats {
   birthdays: { total: number; upcoming: number }
@@ -44,7 +53,9 @@ export function DashboardOverview() {
     tasks: { total: 0, completed: 0, pending: 0, failed: 0 },
   })
   const [user, setUser] = useState<any>(null)
+  const [userProfile, setUserProfile] = useState<any>(null)
   const [isLoading, setIsLoading] = useState(true)
+  const [showProfileModal, setShowProfileModal] = useState(false)
   const router = useRouter()
 
   useEffect(() => {
@@ -58,6 +69,19 @@ export function DashboardOverview() {
       data: { user },
     } = await supabase.auth.getUser()
     setUser(user)
+
+    // Fetch detailed profile information
+    if (user) {
+      try {
+        const profileResponse = await fetch('/api/auth/profile')
+        if (profileResponse.ok) {
+          const profileData = await profileResponse.json()
+          setUserProfile(profileData.data)
+        }
+      } catch (error) {
+        console.error('Error fetching user profile:', error)
+      }
+    }
   }
 
   const fetchDashboardData = async () => {
@@ -141,6 +165,10 @@ export function DashboardOverview() {
     return Math.round((stats.tasks.completed / stats.tasks.total) * 100)
   }
 
+  const handleProfileUpdate = (updatedProfile: any) => {
+    setUserProfile(updatedProfile)
+  }
+
   if (isLoading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-background via-background to-muted/20">
@@ -207,6 +235,15 @@ export function DashboardOverview() {
             </div>
           </div>
         </div>
+  
+        {/* Profile Modal */}
+        <ProfileModal
+          isOpen={showProfileModal}
+          onClose={() => setShowProfileModal(false)}
+          user={user}
+          userProfile={userProfile}
+          onProfileUpdate={handleProfileUpdate}
+        />
       </div>
     )
   }
@@ -234,7 +271,12 @@ export function DashboardOverview() {
             <div className="flex items-center gap-3">
               <ThemeToggle />
               <div className="h-6 w-px bg-border" />
-              <Button variant="ghost" size="sm" className="hover:bg-primary/10 transition-colors">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="hover:bg-primary/10 transition-colors"
+                onClick={() => setShowProfileModal(true)}
+              >
                 <User className="h-4 w-4 mr-2" />
                 Profile
               </Button>

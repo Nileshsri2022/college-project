@@ -50,21 +50,25 @@ export default function BirthdaysPage() {
   const sendNotifications = async () => {
     setIsSendingNotifications(true)
     try {
-      const response = await fetch("/api/birthdays/send-notifications", {
+      // Use the process-scheduled endpoint which handles all pending birthday emails
+      const response = await fetch("/api/birthdays/process-scheduled", {
         method: "POST",
       })
 
-      if (!response.ok) throw new Error("Failed to send notifications")
-
       const data = await response.json()
+
+      if (!response.ok) throw new Error(data.error || "Failed to process birthday emails")
+
       toast({
-        title: "Notifications Sent",
-        description: data.message,
+        title: "Birthday Emails Processed",
+        description: data.message || `Processed ${data.success || 0} successful, ${data.failed || 0} failed`,
       })
+
+      setRefreshKey((prev) => prev + 1)
     } catch (error) {
       toast({
         title: "Error",
-        description: "Failed to send notifications",
+        description: error instanceof Error ? error.message : "Failed to process birthday emails",
         variant: "destructive",
       })
     } finally {
@@ -99,6 +103,7 @@ export default function BirthdaysPage() {
       setIsTestingEmail(false)
     }
   }
+
 
   return (
     <>
@@ -154,7 +159,7 @@ export default function BirthdaysPage() {
             {isSendingNotifications ? (
               <>
                 <Clock className="h-4 w-4 mr-2 animate-spin" />
-                Sending...
+                Processing Birthday Emails...
               </>
             ) : (
               <>
@@ -168,7 +173,7 @@ export default function BirthdaysPage() {
 
         <div className="grid md:grid-cols-2 gap-8">
           <BirthdayForm onSuccess={handleBirthdayAdded} />
-          <BirthdayList refresh={refreshKey} />
+          <BirthdayList refresh={refreshKey} onRefresh={() => setRefreshKey((prev) => prev + 1)} />
         </div>
       </div>
     </>
